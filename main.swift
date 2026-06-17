@@ -132,7 +132,15 @@ class CursorApp: NSObject, NSApplicationDelegate {
     // MARK: - Lifecycle
 
     func applicationDidFinishLaunching(_ notification: Notification) {
-        NSApp.setActivationPolicy(.accessory)
+        NSApp.setActivationPolicy(.regular)
+
+        // Set Dock Icon dynamically (with hardcoded path & bundle fallback)
+        let dockIconPath = "/Users/artem/Desktop/projects/Pixel Cursors/dock_ico_squircle.png"
+        if let dockIcon = NSImage(contentsOfFile: dockIconPath) {
+            NSApp.applicationIconImage = dockIcon
+        } else if let bundleIcon = Bundle.main.image(forResource: "AppIcon") {
+            NSApp.applicationIconImage = bundleIcon
+        }
 
         // Allow cursor hide/show from this background process
         let cid = _CGSDefaultConnection()

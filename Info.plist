@@ -13,6 +13,8 @@
     <key>CFBundleShortVersionString</key>
     <string>1.0</string>
     <key>LSUIElement</key>
-    <true/>
+    <false/>
+    <key>CFBundleIconFile</key>
+    <string>AppIcon</string>
 </dict>
 </plist>
