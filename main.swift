@@ -24,6 +24,9 @@ func CGSGetGlobalCursorData(
     _ outBitsPerComponent: UnsafeMutablePointer<Int32>?
 ) -> Int32
 
+@_silgen_name("CGCursorIsVisible")
+func CGCursorIsVisible() -> Bool
+
 // MARK: - Pixel-perfect image view
 
 class PixelImageView: NSImageView {
@@ -103,8 +106,6 @@ class CursorApp: NSObject, NSApplicationDelegate {
     var trackingTimer: Timer?
     var scale: CGFloat = 2.5
     var lastHotspot = CGPoint.zero
-    // CGDisplayHideCursor is reference-counted: call Hide once, Show once on quit.
-    var systemCursorHidden = false
 
     // Hotspot offsets (in sprite-pixel units from top-left of 18x18 cell).
     // These define where the "click point" is relative to the drawn image.
@@ -143,8 +144,11 @@ class CursorApp: NSObject, NSApplicationDelegate {
     }
 
     func applicationWillTerminate(_ notification: Notification) {
-        if systemCursorHidden {
+        var attempts = 0
+        while !CGCursorIsVisible() && attempts < 10 {
             CGDisplayShowCursor(kCGNullDirectDisplay)
+            attempts += 1
+            Thread.sleep(forTimeInterval: 0.02)
         }
     }
 
@@ -287,47 +291,59 @@ class CursorApp: NSObject, NSApplicationDelegate {
         let hx = Int(hotspot.x), hy = Int(hotspot.y)
         let w  = Int(rect.width), h  = Int(rect.height)
 
-        // Arrow: taller than wide, hotspot upper-left
+        // 1. Arrow: taller than wide, hotspot upper-left
         if h > w && hx <= 6 && hy <= 6 {
             return 0
         }
-        // Pointing hand: square ~32×32, hotspot (13,8)
+        // 2. Thin I-beam (e.g. 9x18, hotspot 4,9)
+        if w < 12 && h > w && hx >= 3 && hx <= 5 && hy >= 7 && hy <= 11 {
+            return 10
+        }
+        // 3. Pointing hand: square ~32×32, hotspot (13,8)
         if hx >= 12 && hx <= 15 && hy >= 6 && hy <= 10 && w >= 28 && w == h {
             return 5
         }
-        // I-beam: near-square, hotspot (12,11)
+        // 4. Closed/Open hand (grabbing/pan): square 32x32, hotspot (16, 17) or (15, 15)
+        if w == 32 && h == 32 && hx >= 14 && hx <= 17 && hy >= 14 && hy <= 17 {
+            return 7
+        }
+        // 5. I-beam (Standard/Alt): near-square, hotspot (12,11)
         if hx >= 11 && hx <= 13 && hy >= 10 && hy <= 12 {
             return 10
         }
-        // Resize vertical: taller than wide, hotspot lower center
+        // 6. Resize vertical: taller than wide, hotspot lower center
         if h > w && hy > hx {
             return 3
         }
-        // Resize horizontal: wider than tall, hotspot right-center
+        // 7. Resize horizontal: wider than tall, hotspot right-center
         if w > h && hx > hy {
             return 2
         }
-        // Diagonal NW-SE: square, hotspot on diagonal
+        // 8. Diagonal NW-SE: square, hotspot on diagonal
         if w == h && hx == hy {
             return 1
         }
-        // Diagonal NE-SW: square, hotspot anti-diagonal
-        if w == h && (hx + hy) >= Int(CGFloat(w) * 0.9) {
+        // 9. Diagonal NE-SW: square, hotspot anti-diagonal
+        if w == h && (hx + hy) >= Int(CGFloat(w) * 0.9) && (hx + hy) <= Int(CGFloat(w) * 1.1) {
             return 4
         }
-        // Crosshair: square, centered hotspot
-        if w == h && abs(hx - w/2) <= 2 && abs(hy - h/2) <= 2 && w < 28 {
+        // 10. Crosshair: square, centered hotspot, smaller size (22x22 or 24x24)
+        if w == h && (w == 22 || w == 24) && abs(hx - w/2) <= 1 && abs(hy - h/2) <= 1 {
             return 11
         }
-        // Forbidden
+        // 11. Zoom In/Out (Magnifying glass: lens center is upper-left-ish, usually 8..10 in 24x24)
+        if w == h && (w == 24 || w == 32) && hx >= w/4 && hx <= w/2 && hy >= h/4 && hy <= h/2 {
+            return 8
+        }
+        // 12. Forbidden (Not Allowed)
         if w == h && w >= 20 && abs(hx - w/2) <= 3 && abs(hy - w/2) <= 3 {
             return 12
         }
-        // Busy/spinning
+        // 13. Busy/spinning
         if w >= 36 || h >= 36 {
             return 13
         }
-        // Move/drag cross
+        // 14. Move/drag cross
         if w >= 24 && w == h {
             return 6
         }
@@ -366,10 +382,9 @@ class CursorApp: NSObject, NSApplicationDelegate {
         }
         overlayWindow.setFrameOrigin(NSPoint(x: mouseLoc.x - hx, y: mouseLoc.y - finalSize + hy))
 
-        // Always hide system cursor (called once; reference-counted)
-        if !systemCursorHidden {
+        // Always hide system cursor dynamically if it becomes visible
+        if CGCursorIsVisible() {
             CGDisplayHideCursor(kCGNullDirectDisplay)
-            systemCursorHidden = true
         }
     }
 
@@ -377,15 +392,16 @@ class CursorApp: NSObject, NSApplicationDelegate {
 
     func hideOverlayShowRealCursor() {
         overlayWindow.orderOut(nil)
-        if systemCursorHidden {
+        var attempts = 0
+        while !CGCursorIsVisible() && attempts < 10 {
             CGDisplayShowCursor(kCGNullDirectDisplay)
-            systemCursorHidden = false
+            attempts += 1
+            Thread.sleep(forTimeInterval: 0.02)
         }
     }
 
     func showOverlayHideRealCursor() {
         overlayWindow.orderFrontRegardless()
-        // tick() hides real cursor on next frame automatically
     }
 
     // MARK: - Logging
