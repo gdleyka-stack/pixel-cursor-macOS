@@ -103,11 +103,8 @@ class CursorApp: NSObject, NSApplicationDelegate {
     var trackingTimer: Timer?
     var scale: CGFloat = 2.5
     var lastHotspot = CGPoint.zero
-
-    // CGDisplayHideCursor / CGDisplayShowCursor are reference-counted.
-    // We call Hide exactly once and track the state so we can Show exactly once.
+    // CGDisplayHideCursor is reference-counted: call Hide once, Show once on quit.
     var systemCursorHidden = false
-    var menuIsOpen = false
 
     // Hotspot offsets (in sprite-pixel units from top-left of 18x18 cell).
     // These define where the "click point" is relative to the drawn image.
@@ -277,49 +274,61 @@ class CursorApp: NSObject, NSApplicationDelegate {
     }
 
     // MARK: - Cursor type detection
+    // All values measured from real CGSGetGlobalCursorData output (see app.log)
+    //
+    // Observed signatures:
+    //   Arrow:        hotspot=(5,5)   rect=28×40
+    //   Hand/finger:  hotspot=(13,8)  rect=32×32
+    //   I-beam:       hotspot=(12,11) rect=23×22  or  28×26
+    //   Resize horiz: hotspot=(12,9)  rect=24×18  or  (15,12) 30×24
+    //   Resize vert:  hotspot=(9,14)  rect=18×28
 
     func detectCursorIndex(hotspot: CGPoint, rect: CGRect) -> Int {
         let hx = Int(hotspot.x), hy = Int(hotspot.y)
         let w  = Int(rect.width), h  = Int(rect.height)
 
-        // I-beam: tall narrow cursor
-        if (w <= 16 && h >= 17) || (h > w && hx >= 10 && hx <= 13 && hy >= 10 && hy <= 13) {
-            return 10
+        // Arrow: taller than wide, hotspot upper-left
+        if h > w && hx <= 6 && hy <= 6 {
+            return 0
         }
-        // Pointing hand: hotspot in upper area
-        if hx >= 12 && hx <= 16 && hy >= 6 && hy <= 11 {
+        // Pointing hand: square ~32×32, hotspot (13,8)
+        if hx >= 12 && hx <= 15 && hy >= 6 && hy <= 10 && w >= 28 && w == h {
             return 5
         }
-        // Resize horizontal: wider than tall
-        if w > h && w >= 18 && hx >= 7 && hx <= 11 {
-            return 2
+        // I-beam: near-square, hotspot (12,11)
+        if hx >= 11 && hx <= 13 && hy >= 10 && hy <= 12 {
+            return 10
         }
-        // Resize vertical: taller than wide
-        if h > w && h >= 18 && hy >= 7 && hy <= 11 {
+        // Resize vertical: taller than wide, hotspot lower center
+        if h > w && hy > hx {
             return 3
         }
+        // Resize horizontal: wider than tall, hotspot right-center
+        if w > h && hx > hy {
+            return 2
+        }
         // Diagonal NW-SE: square, hotspot on diagonal
-        if w == h && w >= 14 && w <= 18 && hx == hy && hx >= 7 {
+        if w == h && hx == hy {
             return 1
         }
         // Diagonal NE-SW: square, hotspot anti-diagonal
-        if w == h && w >= 14 && w <= 18 && (hx + hy) >= 14 && (hx + hy) <= 20 && hx != hy {
+        if w == h && (hx + hy) >= Int(CGFloat(w) * 0.9) {
             return 4
         }
-        // Crosshair: small square, centered
-        if (hx == 8 || hx == 7) && (hy == 8 || hy == 7) && w >= 15 && w <= 18 && w == h {
+        // Crosshair: square, centered hotspot
+        if w == h && abs(hx - w/2) <= 2 && abs(hy - h/2) <= 2 && w < 28 {
             return 11
         }
-        // Forbidden: normal square centered
-        if (hx == 9 || hx == 10) && (hy == 9 || hy == 10) && w >= 18 && w == h {
+        // Forbidden
+        if w == h && w >= 20 && abs(hx - w/2) <= 3 && abs(hy - w/2) <= 3 {
             return 12
         }
-        // Busy / spinning wheel: large
-        if w >= 36 && h >= 36 {
+        // Busy/spinning
+        if w >= 36 || h >= 36 {
             return 13
         }
-        // Move / drag cross: larger square
-        if w >= 20 && w == h {
+        // Move/drag cross
+        if w >= 24 && w == h {
             return 6
         }
         return 0
@@ -328,8 +337,6 @@ class CursorApp: NSObject, NSApplicationDelegate {
     // MARK: - Per-frame tick
 
     func tick() {
-        guard !menuIsOpen else { return }
-
         let mouseLoc = NSEvent.mouseLocation
         let cid = _CGSDefaultConnection()
         var rect = CGRect.zero, hotspot = CGPoint.zero
@@ -350,7 +357,7 @@ class CursorApp: NSObject, NSApplicationDelegate {
             }
         }
 
-        // Position overlay so hotspot pixel aligns with real mouse position
+        // Position overlay: hotspot pixel of sprite aligns with real mouse pos
         let finalSize = 18 * scale
         var hx: CGFloat = 0, hy: CGFloat = 0
         if currentCursorIndex < hotspots.count {
@@ -359,7 +366,7 @@ class CursorApp: NSObject, NSApplicationDelegate {
         }
         overlayWindow.setFrameOrigin(NSPoint(x: mouseLoc.x - hx, y: mouseLoc.y - finalSize + hy))
 
-        // Hide real cursor exactly once (CGDisplayHideCursor is reference-counted)
+        // Always hide system cursor (called once; reference-counted)
         if !systemCursorHidden {
             CGDisplayHideCursor(kCGNullDirectDisplay)
             systemCursorHidden = true
@@ -369,7 +376,6 @@ class CursorApp: NSObject, NSApplicationDelegate {
     // MARK: - Cursor visibility helpers
 
     func hideOverlayShowRealCursor() {
-        menuIsOpen = true
         overlayWindow.orderOut(nil)
         if systemCursorHidden {
             CGDisplayShowCursor(kCGNullDirectDisplay)
@@ -378,9 +384,8 @@ class CursorApp: NSObject, NSApplicationDelegate {
     }
 
     func showOverlayHideRealCursor() {
-        menuIsOpen = false
         overlayWindow.orderFrontRegardless()
-        // tick() will hide the real cursor on next frame
+        // tick() hides real cursor on next frame automatically
     }
 
     // MARK: - Logging
@@ -401,12 +406,9 @@ class CursorApp: NSObject, NSApplicationDelegate {
 // MARK: - NSMenuDelegate
 
 extension CursorApp: NSMenuDelegate {
-    func menuWillOpen(_ menu: NSMenu) {
-        hideOverlayShowRealCursor()
-    }
-    func menuDidClose(_ menu: NSMenu) {
-        showOverlayHideRealCursor()
-    }
+    // When menu opens: keep overlay visible (cursor still hidden), just keep ticking
+    func menuWillOpen(_ menu: NSMenu) {}
+    func menuDidClose(_ menu: NSMenu) {}
 }
 
 // MARK: - Entry point
