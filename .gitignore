@@ -1,0 +1,26 @@
+# Compiled binary
+PixelCursors
+
+# macOS system files
+.DS_Store
+**/.DS_Store
+
+# Logs
+*.log
+
+# Xcode
+*.xcodeproj/
+*.xcworkspace/
+xcuserdata/
+DerivedData/
+*.ipa
+*.dSYM.zip
+*.dSYM
+
+# Swift Package Manager
+.build/
+.swiftpm/
+
+# Editor
+.vscode/
+.idea/
