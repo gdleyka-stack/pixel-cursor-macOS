@@ -335,9 +335,9 @@ class CursorApp: NSObject, NSApplicationDelegate {
                 let valTR = Int(bytes[offsetTR]) + Int(bytes[offsetTR+1]) + Int(bytes[offsetTR+2]) + Int(bytes[offsetTR+3])
                 
                 if valTL > 0 && valTR == 0 {
-                    return 1 // Diagonal NW-SE (resize d)
+                    return 4 // Diagonal NW-SE (04_resize d2)
                 } else if valTR > 0 && valTL == 0 {
-                    return 4 // Diagonal NE-SW (04_resize d2)
+                    return 1 // Diagonal NE-SW (resize d)
                 }
             }
             return 11 // Crosshair
