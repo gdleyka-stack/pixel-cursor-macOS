@@ -138,12 +138,18 @@ class CursorApp: NSObject, NSApplicationDelegate {
         let cid = _CGSDefaultConnection()
         _ = CGSSetConnectionProperty(cid, cid, "SetsCursorInBackground" as CFString, kCFBooleanTrue)
 
+        // Load scale setting from UserDefaults
+        let savedScale = UserDefaults.standard.double(forKey: "cursorScale")
+        if savedScale >= 1.5 && savedScale <= 5.0 {
+            self.scale = CGFloat(savedScale)
+        }
+
         loadCursors()
         setupStatusItem()
         setupOverlayWindow()
         startTracking()
 
-        log("Pixel Cursors started. Loaded \(cursors.count) cursors.")
+        log("Pixel Cursors started. Loaded \(cursors.count) cursors. Scale: \(scale)")
     }
 
     func applicationWillTerminate(_ notification: Notification) {
@@ -230,6 +236,7 @@ class CursorApp: NSObject, NSApplicationDelegate {
         sliderView.onChanged = { [weak self] newScale in
             guard let self else { return }
             self.scale = newScale
+            UserDefaults.standard.set(Double(newScale), forKey: "cursorScale")
             self.resizeOverlay()
         }
         let sliderItem = NSMenuItem()
@@ -311,19 +318,8 @@ class CursorApp: NSObject, NSApplicationDelegate {
         if w == 32 && h == 32 && hx >= 14 && hx <= 17 && hy >= 14 && hy <= 17 {
             return 7
         }
-        // 5. I-beam (Standard/Alt): near-square, hotspot (12,11)
-        if hx >= 11 && hx <= 13 && hy >= 10 && hy <= 12 {
-            return 10
-        }
-        // 6. Resize vertical: taller than wide, hotspot lower center
-        if h > w && hy > hx {
-            return 3
-        }
-        // 7. Resize horizontal: wider than tall, hotspot right-center
-        if w > h && hx > hy {
-            return 2
-        }
-        // 8. Diagonal NW-SE / NE-SW & Crosshair detection (centered hotspot on 22x22 / 24x24 squares)
+        // 5. Diagonal NW-SE / NE-SW & Crosshair detection (centered hotspot on 22x22 / 24x24 squares)
+        // Note: Must run before standard I-beam checks, because diagonal hotspots (11,11) intersect I-beam coordinates.
         if w == h && (w == 22 || w == 24) && abs(hx - w/2) <= 1 && abs(hy - h/2) <= 1 {
             let xTL = w / 4
             let yTL = h / 4
@@ -345,6 +341,18 @@ class CursorApp: NSObject, NSApplicationDelegate {
                 }
             }
             return 11 // Crosshair
+        }
+        // 6. I-beam (Standard/Alt): near-square, hotspot (12,11)
+        if hx >= 11 && hx <= 13 && hy >= 10 && hy <= 12 {
+            return 10
+        }
+        // 7. Resize vertical: taller than wide, hotspot lower center
+        if h > w && hy > hx {
+            return 3
+        }
+        // 8. Resize horizontal: wider than tall, hotspot right-center
+        if w > h && hx > hy {
+            return 2
         }
         // 9. Diagonal NW-SE fallback (if sizes/hotspots differ)
         if w == h && hx == hy {
