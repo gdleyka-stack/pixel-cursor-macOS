@@ -106,6 +106,9 @@ class CursorApp: NSObject, NSApplicationDelegate {
     var trackingTimer: Timer?
     var scale: CGFloat = 2.5
     var lastHotspot = CGPoint.zero
+    
+    // Pre-allocated buffer for cursor raw data
+    let cursorBuffer = UnsafeMutableRawPointer.allocate(byteCount: 16384, alignment: 1)
 
     // Hotspot offsets (in sprite-pixel units from top-left of 18x18 cell).
     // These define where the "click point" is relative to the drawn image.
@@ -150,6 +153,7 @@ class CursorApp: NSObject, NSApplicationDelegate {
             attempts += 1
             Thread.sleep(forTimeInterval: 0.02)
         }
+        cursorBuffer.deallocate()
     }
 
     // MARK: - Cursor assets
@@ -251,7 +255,7 @@ class CursorApp: NSObject, NSApplicationDelegate {
         overlayWindow.backgroundColor = .clear
         overlayWindow.isOpaque = false
         overlayWindow.ignoresMouseEvents = true
-        overlayWindow.level = .statusBar
+        overlayWindow.level = NSWindow.Level(rawValue: Int(CGShieldingWindowLevel()) + 1)
         overlayWindow.collectionBehavior = [.canJoinAllSpaces, .stationary, .ignoresCycle]
 
         cursorImageView = PixelImageView(frame: NSRect(x: 0, y: 0, width: size, height: size))
@@ -287,7 +291,7 @@ class CursorApp: NSObject, NSApplicationDelegate {
     //   Resize horiz: hotspot=(12,9)  rect=24×18  or  (15,12) 30×24
     //   Resize vert:  hotspot=(9,14)  rect=18×28
 
-    func detectCursorIndex(hotspot: CGPoint, rect: CGRect) -> Int {
+    func detectCursorIndex(hotspot: CGPoint, rect: CGRect, buffer: UnsafeMutableRawPointer, dataSize: Int, rowBytes: Int) -> Int {
         let hx = Int(hotspot.x), hy = Int(hotspot.y)
         let w  = Int(rect.width), h  = Int(rect.height)
 
@@ -319,17 +323,36 @@ class CursorApp: NSObject, NSApplicationDelegate {
         if w > h && hx > hy {
             return 2
         }
-        // 8. Diagonal NW-SE: square, hotspot on diagonal
+        // 8. Diagonal NW-SE / NE-SW & Crosshair detection (centered hotspot on 22x22 / 24x24 squares)
+        if w == h && (w == 22 || w == 24) && abs(hx - w/2) <= 1 && abs(hy - h/2) <= 1 {
+            let xTL = w / 4
+            let yTL = h / 4
+            let offsetTL = yTL * rowBytes + xTL * 4
+            
+            let xTR = 3 * w / 4
+            let yTR = h / 4
+            let offsetTR = yTR * rowBytes + xTR * 4
+            
+            if offsetTL + 3 < dataSize && offsetTR + 3 < dataSize {
+                let bytes = buffer.assumingMemoryBound(to: UInt8.self)
+                let valTL = Int(bytes[offsetTL]) + Int(bytes[offsetTL+1]) + Int(bytes[offsetTL+2]) + Int(bytes[offsetTL+3])
+                let valTR = Int(bytes[offsetTR]) + Int(bytes[offsetTR+1]) + Int(bytes[offsetTR+2]) + Int(bytes[offsetTR+3])
+                
+                if valTL > 0 && valTR == 0 {
+                    return 1 // Diagonal NW-SE (resize d)
+                } else if valTR > 0 && valTL == 0 {
+                    return 4 // Diagonal NE-SW (04_resize d2)
+                }
+            }
+            return 11 // Crosshair
+        }
+        // 9. Diagonal NW-SE fallback (if sizes/hotspots differ)
         if w == h && hx == hy {
             return 1
         }
-        // 9. Diagonal NE-SW: square, hotspot anti-diagonal
+        // 10. Diagonal NE-SW fallback
         if w == h && (hx + hy) >= Int(CGFloat(w) * 0.9) && (hx + hy) <= Int(CGFloat(w) * 1.1) {
             return 4
-        }
-        // 10. Crosshair: square, centered hotspot, smaller size (22x22 or 24x24)
-        if w == h && (w == 22 || w == 24) && abs(hx - w/2) <= 1 && abs(hy - h/2) <= 1 {
-            return 11
         }
         // 11. Zoom In/Out (Magnifying glass: lens center is upper-left-ish, usually 8..10 in 24x24)
         if w == h && (w == 24 || w == 32) && hx >= w/4 && hx <= w/2 && hy >= h/4 && hy <= h/2 {
@@ -357,16 +380,23 @@ class CursorApp: NSObject, NSApplicationDelegate {
         let cid = _CGSDefaultConnection()
         var rect = CGRect.zero, hotspot = CGPoint.zero
         var depth: Int32 = 0, components: Int32 = 0, bitsPerComp: Int32 = 0
-        var rowBytes: Int32 = 0, dataSize: Int32 = 0
+        var rowBytes: Int32 = 0
+        var dataSize: Int32 = 16384
 
-        let ok = CGSGetGlobalCursorData(cid, nil, &dataSize, &rowBytes, &rect,
+        let ok = CGSGetGlobalCursorData(cid, cursorBuffer, &dataSize, &rowBytes, &rect,
                                         &hotspot, &depth, &components, &bitsPerComp)
         if ok == 0 {
             if hotspot != lastHotspot {
                 lastHotspot = hotspot
                 log("cursor changed: hotspot=\(hotspot) rect=\(rect)")
             }
-            let idx = detectCursorIndex(hotspot: hotspot, rect: rect)
+            let idx = detectCursorIndex(
+                hotspot: hotspot,
+                rect: rect,
+                buffer: cursorBuffer,
+                dataSize: Int(dataSize),
+                rowBytes: Int(rowBytes)
+            )
             if idx != currentCursorIndex, idx < cursors.count {
                 currentCursorIndex = idx
                 cursorImageView.image = cursors[idx]
