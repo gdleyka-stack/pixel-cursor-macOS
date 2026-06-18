@@ -99,7 +99,7 @@ class SliderMenuView: NSView {
 class CursorApp: NSObject, NSApplicationDelegate {
 
     var statusItem: NSStatusItem!
-    var overlayWindow: NSWindow!
+    var overlayWindow: NSPanel!
     var cursorImageView: PixelImageView!
     var cursors: [NSImage] = []
     var currentCursorIndex = 0
@@ -261,9 +261,9 @@ class CursorApp: NSObject, NSApplicationDelegate {
 
     func setupOverlayWindow() {
         let size = 18 * scale
-        overlayWindow = NSWindow(
+        overlayWindow = NSPanel(
             contentRect: NSRect(x: 0, y: 0, width: size, height: size),
-            styleMask: [.borderless],
+            styleMask: [.borderless, .nonactivatingPanel],
             backing: .buffered,
             defer: false
         )
@@ -271,7 +271,7 @@ class CursorApp: NSObject, NSApplicationDelegate {
         overlayWindow.isOpaque = false
         overlayWindow.ignoresMouseEvents = true
         overlayWindow.level = NSWindow.Level(rawValue: Int(CGShieldingWindowLevel()) + 1)
-        overlayWindow.collectionBehavior = [.canJoinAllSpaces, .stationary, .ignoresCycle]
+        overlayWindow.collectionBehavior = [.canJoinAllSpaces, .stationary, .ignoresCycle, .fullScreenAuxiliary]
 
         cursorImageView = PixelImageView(frame: NSRect(x: 0, y: 0, width: size, height: size))
         cursorImageView.imageScaling = .scaleProportionallyUpOrDown
@@ -291,9 +291,11 @@ class CursorApp: NSObject, NSApplicationDelegate {
     // MARK: - Tracking
 
     func startTracking() {
-        trackingTimer = Timer.scheduledTimer(withTimeInterval: 1.0 / 120.0, repeats: true) { [weak self] _ in
+        let timer = Timer(timeInterval: 1.0 / 120.0, repeats: true) { [weak self] _ in
             self?.tick()
         }
+        RunLoop.current.add(timer, forMode: .common)
+        trackingTimer = timer
     }
 
     // MARK: - Cursor type detection
